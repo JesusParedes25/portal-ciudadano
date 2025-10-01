@@ -1,0 +1,143 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom CSS para mantener compatibilidad con el diseño original */
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: 'Montserrat', sans-serif;
+    line-height: 1.6;
+    color: #2c2c2c;
+    overflow-x: hidden;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer components {
+  /* Botones personalizados */
+  .btn-primary-custom {
+    @apply bg-primary text-white px-6 py-3 rounded-lg font-medium transition-all duration-300 hover:bg-primary-700 hover:-translate-y-0.5;
+  }
+
+  .btn-secondary-custom {
+    @apply bg-transparent text-primary border-2 border-primary px-6 py-3 rounded-lg font-medium transition-all duration-300 hover:bg-primary hover:text-white;
+  }
+
+  /* Hero background personalizado */
+  .hero-bg {
+    background: linear-gradient(135deg, rgba(159, 34, 65, 0.9) 0%, rgba(159, 34, 65, 0.7) 100%), 
+                url('https://images.unsplash.com/photo-1497366216548-37526070297c?w=1920&h=1080&fit=crop&auto=format&q=80');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+  }
+
+  /* Animaciones personalizadas */
+  .fade-in-up {
+    animation: fadeInUp 0.6s ease-out;
+  }
+
+
+  /* Cards con hover effect */
+  .card-hover {
+    @apply transition-transform duration-300 hover:-translate-y-1;
+  }
+
+  /* Modal backdrop */
+  .modal-backdrop {
+    @apply fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center;
+  }
+
+  /* Navegación móvil */
+  .nav-menu-mobile {
+    @apply fixed left-0 top-20 w-full bg-white shadow-lg transform -translate-x-full transition-transform duration-300 z-40;
+  }
+
+  .nav-menu-mobile.active {
+    @apply translate-x-0;
+  }
+}
+
+@layer utilities {
+  /* Utilidades personalizadas */
+  .text-shadow {
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+  }
+
+  .text-shadow-sm {
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+  }
+
+  /* Scrollbar personalizado */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #9F2241 #f1f1f1;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: #f1f1f1;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: #9F2241;
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: #7A1B32;
+  }
+}
+
+/* Keyframes para animaciones */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Spinner para loading states */
+.spinner {
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #9F2241;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  animation: spin 1s linear infinite;
+  display: inline-block;
+  margin-right: 10px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .timeline-line {
+    @apply left-5;
+  }
+  
+  .timeline-item-left,
+  .timeline-item-right {
+    @apply justify-start pl-12;
+  }
+}

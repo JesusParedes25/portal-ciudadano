@@ -1,0 +1,7 @@
+# Variables de entorno para la aplicación React
+# Copia este archivo como .env y agrega tus valores reales
+
+# API Key de OpenAI para búsqueda inteligente
+REACT_APP_OPENAI_API_KEY=tu_api_key_aqui
+
+# Google Maps API Key
