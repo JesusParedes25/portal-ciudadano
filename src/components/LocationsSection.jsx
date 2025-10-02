@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { buscarTramitesRelevantes, generarSugerencias } from '../services/busquedaTramites'
+import { calcularDistanciasReales, calcularDistanciaLineaRecta } from '../services/googleMapsService'
+
+// Google Maps API Key
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 
 // Cargar Leaflet dinámicamente
 const loadLeaflet = () => {
@@ -37,6 +41,8 @@ const LocationsSection = () => {
   const mapRef = useRef(null)
   const [suggestions, setSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const [showStreetView, setShowStreetView] = useState(false) // Controlar visibilidad de Street View
+  const [isCalculatingDistance, setIsCalculatingDistance] = useState(false) // Loading de distancia
 
 
   // Obtener geolocalización del usuario solo cuando busque
@@ -66,17 +72,49 @@ const LocationsSection = () => {
     })
   }
 
-  // Función para calcular distancia entre dos puntos (fórmula de Haversine)
-  const calculateDistance = (lat1, lng1, lat2, lng2) => {
-    const R = 6371 // Radio de la Tierra en km
-    const dLat = (lat2 - lat1) * Math.PI / 180
-    const dLng = (lng2 - lng1) * Math.PI / 180
-    const a = 
-      Math.sin(dLat/2) * Math.sin(dLat/2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-      Math.sin(dLng/2) * Math.sin(dLng/2)
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-    return R * c
+  // Función para calcular distancia de UNA oficina específica
+  const calcularDistanciaOficina = async (oficina) => {
+    if (!userLocation || !oficina.coordenadas || !oficina.coordenadas.coordinates) {
+      return oficina
+    }
+
+    setIsCalculatingDistance(true)
+    
+    try {
+      const destino = {
+        lat: oficina.coordenadas.coordinates[1],
+        lng: oficina.coordenadas.coordinates[0]
+      }
+      
+      const distancias = await calcularDistanciasReales(userLocation, [destino])
+      
+      if (distancias && distancias[0]) {
+        return {
+          ...oficina,
+          distancia: distancias[0].distancia,
+          distanciaTexto: distancias[0].distanciaTexto,
+          duracion: distancias[0].duracion,
+          duracionTexto: distancias[0].duracionTexto,
+          esDistanciaReal: true
+        }
+      }
+    } catch (error) {
+      console.error('Error calculando distancia:', error)
+    } finally {
+      setIsCalculatingDistance(false)
+    }
+    
+    // Fallback: línea recta
+    return {
+      ...oficina,
+      distancia: calcularDistanciaLineaRecta(
+        userLocation.lat,
+        userLocation.lng,
+        oficina.coordenadas.coordinates[1],
+        oficina.coordenadas.coordinates[0]
+      ),
+      esDistanciaReal: false
+    }
   }
 
   // Función para generar sugerencias de autocompletado usando el servicio inteligente
@@ -124,65 +162,40 @@ const LocationsSection = () => {
         console.log(`  ${i + 1}. ${t.nombre} (ID: ${t.idtram})`);
       });
 
-      // Si hay ubicación del usuario, agregar factor geográfico
-      let tramitesConPuntaje = tramitesRelevantesEncontrados
-      
-      if (currentUserLocation) {
-        tramitesConPuntaje = tramitesRelevantesEncontrados.map(tramite => {
-          let bonusGeografico = 0
+      // Procesar resultados SIN calcular distancias (optimización de costos)
+      // Las distancias se calcularán solo cuando el usuario seleccione una oficina
+      const processedResults = tramitesRelevantesEncontrados.map(tramite => {
+        let oficinas = []
+        let distanciaMasCercana = Infinity
+        
+        if (tramite.atencion && Array.isArray(tramite.atencion)) {
+          oficinas = tramite.atencion.map(oficina => ({
+            ...oficina,
+            tramite: tramite.nombre,
+            tramiteId: tramite.idtram,
+            distancia: null, // No calcular todavía
+            esDistanciaReal: false
+          }))
           
-          if (tramite.atencion) {
-            const hasNearbyOffice = tramite.atencion.some(oficina => {
+          // Ordenar por línea recta si tenemos ubicación (sin API)
+          if (currentUserLocation) {
+            oficinas.forEach(oficina => {
               if (oficina.coordenadas && oficina.coordenadas.coordinates) {
-                const distance = calculateDistance(
+                oficina.distancia = calcularDistanciaLineaRecta(
                   currentUserLocation.lat,
                   currentUserLocation.lng,
                   oficina.coordenadas.coordinates[1],
                   oficina.coordenadas.coordinates[0]
                 )
-                return distance < 50 // Dentro de 50km
+                
+                // Guardar la distancia más cercana para ordenar trámites
+                if (oficina.distancia < distanciaMasCercana) {
+                  distanciaMasCercana = oficina.distancia
+                }
               }
-              return false
             })
             
-            if (hasNearbyOffice) {
-              bonusGeografico = 25
-            }
-          }
-          
-          return {
-            ...tramite,
-            bonusGeografico
-          }
-        })
-        
-        // Reordenar considerando el bonus geográfico
-        tramitesConPuntaje.sort((a, b) => {
-          return (b.bonusGeografico || 0) - (a.bonusGeografico || 0)
-        })
-      }
-
-      // Procesar resultados y calcular distancias
-      let processedResults = tramitesConPuntaje.map(tramite => {
-        let oficinasConDistancia = []
-        
-        if (tramite.atencion && Array.isArray(tramite.atencion)) {
-          oficinasConDistancia = tramite.atencion.map(oficina => {
-            let distancia = null
-            if (currentUserLocation && oficina.coordenadas && oficina.coordenadas.coordinates) {
-              distancia = calculateDistance(
-                currentUserLocation.lat,
-                currentUserLocation.lng,
-                oficina.coordenadas.coordinates[1], // lat
-                oficina.coordenadas.coordinates[0]  // lng
-              )
-            }
-            return { ...oficina, distancia, tramite: tramite.nombre, tramiteId: tramite.idtram }
-          })
-
-          // Ordenar oficinas por distancia si tenemos ubicación
-          if (currentUserLocation) {
-            oficinasConDistancia.sort((a, b) => {
+            oficinas.sort((a, b) => {
               if (a.distancia === null) return 1
               if (b.distancia === null) return -1
               return a.distancia - b.distancia
@@ -192,9 +205,26 @@ const LocationsSection = () => {
 
         return {
           ...tramite,
-          oficinasOrdenadas: oficinasConDistancia
+          oficinasOrdenadas: oficinas,
+          distanciaMasCercana: distanciaMasCercana // Para ordenar trámites
         }
       })
+
+      // Ordenar trámites por la oficina más cercana de cada uno
+      if (currentUserLocation) {
+        processedResults.sort((a, b) => {
+          if (a.distanciaMasCercana === Infinity) return 1
+          if (b.distanciaMasCercana === Infinity) return -1
+          return a.distanciaMasCercana - b.distanciaMasCercana
+        })
+        
+        console.log('📊 Trámites ordenados por cercanía:');
+        processedResults.forEach((t, i) => {
+          if (t.distanciaMasCercana !== Infinity) {
+            console.log(`  ${i + 1}. ${t.nombre} - Oficina más cercana: ${t.distanciaMasCercana.toFixed(1)} km`);
+          }
+        });
+      }
 
       setSearchResults(processedResults)
       setShowResults(true)
@@ -307,50 +337,14 @@ const LocationsSection = () => {
         
         const marker = L.marker([lat, lng], { icon: officeIcon }).addTo(map)
         
-        // Popup con información de la oficina
-        const popupContent = `
-          <div class="p-3" style="min-width: 300px;">
-            <h4 class="font-semibold text-sm mb-2">${oficina.nombre}</h4>
-            <p class="text-xs text-gray-600 mb-2">${oficina.direccion}</p>
-            ${oficina.distancia ? `<p class="text-xs text-green-600 font-medium mb-3"><i class="fas fa-map-marker-alt mr-1"></i>${oficina.distancia.toFixed(1)} km de distancia</p>` : ''}
-            
-            <!-- Street View integrado -->
-            <div class="mb-3">
-              <iframe 
-                src="https://www.google.com/maps/embed/v1/streetview?key=APIKEY&location=${lat},${lng}&heading=0&pitch=0&fov=90" 
-                width="280" 
-                height="150" 
-                style="border:0; border-radius: 6px;" 
-                allowfullscreen="" 
-                loading="lazy" 
-                referrerpolicy="no-referrer-when-downgrade">
-              </iframe>
-            </div>
-            
-            <div class="flex gap-2 mb-2">
-              <button onclick="window.open('https://www.google.com/maps/dir/${userLocation ? `${userLocation.lat},${userLocation.lng}` : ''}/${lat},${lng}', '_blank')" class="bg-primary text-white px-3 py-2 rounded text-xs font-medium hover:bg-primary-700 transition-colors duration-300 flex-1">
-                <i class="fas fa-route mr-1"></i>Ver Ruta
-              </button>
-              <button onclick="window.open('https://www.google.com/maps/@${lat},${lng},3a,75y,90t/data=!3m1!1e3', '_blank')" class="bg-secondary text-white px-3 py-2 rounded text-xs font-medium hover:bg-secondary-700 transition-colors duration-300 flex-1">
-                <i class="fas fa-external-link-alt mr-1"></i>Street View
-              </button>
-            </div>
-            
-            ${oficina.tramiteId ? `
-            <div class="flex">
-              <button onclick="window.open('https://ruts.hidalgo.gob.mx/ver/${oficina.tramiteId}', '_blank')" class="bg-accent text-white px-3 py-2 rounded text-xs font-medium hover:bg-accent-700 transition-colors duration-300 flex-1">
-                <i class="fas fa-file-alt mr-1"></i>Ver Requisitos Completos
-              </button>
-            </div>
-            ` : ''}
-          </div>
-        `
-        
-        marker.bindPopup(popupContent)
-        
-        // Evento de clic para seleccionar oficina
-        marker.on('click', () => {
-          setSelectedOffice(oficina)
+        // SIN POPUP - Solo evento de clic para mostrar en panel inferior
+        marker.on('click', async () => {
+          // Calcular distancia real solo al seleccionar
+          const oficinaConDistancia = await calcularDistanciaOficina(oficina)
+          setSelectedOffice(oficinaConDistancia)
+          
+          // Centrar mapa en la oficina
+          map.setView([lat, lng], 15)
         })
       })
 
@@ -399,20 +393,8 @@ const LocationsSection = () => {
       `}</style>
       
       <section id="ubicaciones" className="py-20 relative">
-      {/* Google Maps Background */}
-      <div className="absolute inset-0 z-0">
-        <iframe
-          src={`https://www.google.com/maps/embed/v1/view?key=APIKEY&center=20.1219,-98.7324&zoom=10&maptype=roadmap`}
-          width="100%"
-          height="100%"
-          style={{ border: 0, filter: 'grayscale(20%) opacity(0.3)' }}
-          allowFullScreen=""
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-        ></iframe>
-        {/* Overlay para mejorar legibilidad */}
-        <div className="absolute inset-0 bg-white bg-opacity-90"></div>
-      </div>
+      {/* Fondo con gradiente institucional */}
+      <div className="absolute inset-0 z-0 bg-gradient-to-br from-gray-50 via-white to-gray-100"></div>
       
       <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section Header */}
@@ -436,7 +418,7 @@ const LocationsSection = () => {
                   value={searchTerm}
                   onChange={handleInputChange}
                   onKeyPress={handleKeyPress}
-                  onFocus={() => generateSuggestions(searchTerm)}
+                  onFocus={() => handleGenerateSuggestions(searchTerm)}
                   onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                   className="w-full px-4 py-3 text-base border-2 border-gray-200 rounded-lg focus:border-primary focus:outline-none transition-colors duration-300 pr-10"
                 />
@@ -445,7 +427,7 @@ const LocationsSection = () => {
               
               {/* Sugerencias de autocompletado */}
               {showSuggestions && suggestions.length > 0 && (
-                <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg mt-1 z-50 max-h-64 overflow-y-auto">
+                <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg mt-1 z-[9999] max-h-64 overflow-y-auto">
                   {suggestions.map((suggestion, index) => (
                     <button
                       key={index}
@@ -551,8 +533,15 @@ const LocationsSection = () => {
 
                   {/* Información de la oficina seleccionada */}
                   {selectedOffice && (
-                    <div className="absolute bottom-4 left-4 bg-white bg-opacity-95 rounded-lg p-4 shadow-lg max-w-sm">
-                      <h4 className="font-semibold text-sm mb-2">{selectedOffice.nombre}</h4>
+                    <div className="absolute bottom-4 left-4 bg-white bg-opacity-95 rounded-lg p-4 shadow-lg max-w-sm z-[1000] border-2 border-primary">
+                      <button
+                        onClick={() => setSelectedOffice(null)}
+                        className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 transition-colors"
+                        title="Cerrar"
+                      >
+                        <i className="fas fa-times"></i>
+                      </button>
+                      <h4 className="font-semibold text-sm mb-2 pr-6">{selectedOffice.nombre}</h4>
                       <p className="text-xs text-gray-600 mb-2">{selectedOffice.direccion}</p>
                       <p className="text-xs text-gray-600 mb-2">
                         <i className="fas fa-clock mr-1"></i>{selectedOffice.horario}
@@ -562,11 +551,28 @@ const LocationsSection = () => {
                           <i className="fas fa-phone mr-1"></i>{selectedOffice.telefonos}
                         </p>
                       )}
+                      {/* Distancia con loading state */}
                       {selectedOffice.distancia && (
-                        <p className="text-xs text-green-600 font-medium mb-3">
-                          <i className="fas fa-map-marker-alt mr-1"></i>
-                          {selectedOffice.distancia.toFixed(1)} km de distancia
-                        </p>
+                        <div className="mb-3">
+                          <p className="text-xs text-green-600 font-medium">
+                            <i className="fas fa-map-marker-alt mr-1"></i>
+                            {selectedOffice.esDistanciaReal ? (
+                              <>
+                                {selectedOffice.distanciaTexto || `${selectedOffice.distancia.toFixed(1)} km`}
+                                {selectedOffice.duracionTexto && ` (${selectedOffice.duracionTexto})`}
+                              </>
+                            ) : (
+                              `${selectedOffice.distancia.toFixed(1)} km (línea recta)`
+                            )}
+                          </p>
+                        </div>
+                      )}
+                      
+                      {isCalculatingDistance && (
+                        <div className="mb-3 text-xs text-gray-500 italic">
+                          <i className="fas fa-spinner fa-spin mr-1"></i>
+                          Calculando distancia real...
+                        </div>
                       )}
 
                       {/* Botón Ver Requisitos si tenemos el trámite asociado */}
@@ -584,33 +590,51 @@ const LocationsSection = () => {
                         </div>
                       )}
 
-                      <div className="flex gap-2">
+                      {/* Street View (solo si usuario lo solicita) */}
+                      {showStreetView && selectedOffice.coordenadas && (
+                        <div className="mb-3">
+                          <iframe
+                            src={`https://www.google.com/maps/embed/v1/streetview?key=${GOOGLE_MAPS_API_KEY}&location=${selectedOffice.coordenadas.coordinates[1]},${selectedOffice.coordenadas.coordinates[0]}&heading=0&pitch=0&fov=90`}
+                            width="100%"
+                            height="180"
+                            style={{ border: 0, borderRadius: '6px' }}
+                            allowFullScreen=""
+                            loading="lazy"
+                            referrerPolicy="no-referrer-when-downgrade"
+                          />
+                        </div>
+                      )}
+                      
+                      {/* Botones de acción */}
+                      <div className="flex flex-col gap-2">
                         <button
                           onClick={() => openInGoogleMaps(
                             selectedOffice.coordenadas.coordinates[1],
                             selectedOffice.coordenadas.coordinates[0],
                             selectedOffice.nombre
                           )}
-                          className="bg-primary text-white px-3 py-1 rounded text-xs font-medium hover:bg-primary-700 transition-colors duration-300 flex items-center gap-1"
+                          className="w-full bg-primary text-white px-3 py-2 rounded text-xs font-medium hover:bg-primary-700 transition-colors duration-300 flex items-center justify-center gap-1"
                         >
                           <i className="fas fa-route"></i>
-                          Ver Ruta
+                          Cómo Llegar (Google Maps)
                         </button>
+                        
                         <button
-                          onClick={() => {
-                            const lat = selectedOffice.coordenadas.coordinates[1]
-                            const lng = selectedOffice.coordenadas.coordinates[0]
-                            window.open(`https://www.google.com/maps/@${lat},${lng},3a,75y,90t/data=!3m1!1e3`, '_blank')
-                          }}
-                          className="bg-secondary text-white px-3 py-1 rounded text-xs font-medium hover:bg-secondary-700 transition-colors duration-300 flex items-center gap-1"
+                          onClick={() => setShowStreetView(!showStreetView)}
+                          className={`w-full ${showStreetView ? 'bg-gray-500' : 'bg-secondary'} text-white px-3 py-2 rounded text-xs font-medium hover:opacity-90 transition-all duration-300 flex items-center justify-center gap-1`}
                         >
-                          <i className="fas fa-street-view"></i>
-                          Street View
+                          <i className={`fas fa-${showStreetView ? 'eye-slash' : 'street-view'}`}></i>
+                          {showStreetView ? 'Ocultar' : 'Ver'} Street View
                         </button>
                       </div>
+                      
                       <button
-                        onClick={() => setSelectedOffice(null)}
-                        className="absolute top-2 right-2 text-gray-400 hover:text-gray-600"
+                        onClick={() => {
+                          setSelectedOffice(null)
+                          setShowStreetView(false)
+                        }}
+                        className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 transition-colors"
+                        title="Cerrar"
                       >
                         <i className="fas fa-times"></i>
                       </button>
@@ -691,9 +715,18 @@ const LocationsSection = () => {
                                     {tramite.oficinasOrdenadas[0].direccion}
                                   </p>
                                   {tramite.oficinasOrdenadas[0].distancia && (
-                                    <p className="text-green-600 font-medium mt-1">
+                                    <p className="text-green-600 font-medium mt-1 text-xs">
                                       <i className="fas fa-map-marker-alt mr-1"></i>
-                                      {tramite.oficinasOrdenadas[0].distancia.toFixed(1)} km
+                                      {tramite.oficinasOrdenadas[0].esDistanciaReal ? (
+                                        <>
+                                          {tramite.oficinasOrdenadas[0].distanciaTexto || `${tramite.oficinasOrdenadas[0].distancia.toFixed(1)} km`}
+                                          {tramite.oficinasOrdenadas[0].duracionTexto && (
+                                            <> ({tramite.oficinasOrdenadas[0].duracionTexto})</>
+                                          )}
+                                        </>
+                                      ) : (
+                                        `${tramite.oficinasOrdenadas[0].distancia.toFixed(1)} km`
+                                      )}
                                     </p>
                                   )}
                                 </div>

@@ -46,53 +46,85 @@ export function calcularRelevancia(tramite, palabrasClave, consultaNormalizada) 
   const dependenciaNorm = normalizarTexto(tramite.dependencia?.nombre || '')
   const tipoNorm = normalizarTexto(tramite.tipo || '')
   
-  // Búsqueda por coincidencia exacta de frase en nombre (máxima prioridad)
-  if (consultaNormalizada.length > 3 && nombreNorm.includes(consultaNormalizada)) {
-    puntuacion += 100
+  // PRIORIDAD MÁXIMA: Coincidencia EXACTA de toda la frase en nombre
+  if (consultaNormalizada.length > 5 && nombreNorm.includes(consultaNormalizada)) {
+    puntuacion += 500 // Muy alto para garantizar que sea el primero
   }
   
-  // Búsqueda por coincidencia exacta de frase en descripción
-  if (consultaNormalizada.length > 3 && descripcionNorm.includes(consultaNormalizada)) {
+  // PRIORIDAD ALTA: Coincidencia de palabras principales en secuencia en el nombre
+  const palabrasPrincipales = palabrasClave.filter(p => p.length > 3)
+  if (palabrasPrincipales.length >= 2) {
+    const todasEnNombre = palabrasPrincipales.every(p => nombreNorm.includes(p))
+    if (todasEnNombre) {
+      puntuacion += 200 // Alto puntaje por tener todas las palabras clave principales
+    }
+  }
+  
+  // PENALIZACIÓN FUERTE: Reducir dramáticamente trámites que son variantes
+  const palabrasVariante = ['provisional', 'reposicion', 'renovacion', 'canje', 'duplicado', 
+                            'constancia de no', 'liberacion', 'infraccion']
+  const esVariante = palabrasVariante.some(palabra => nombreNorm.includes(palabra))
+  
+  if (esVariante) {
+    // PENALIZACIÓN MUY FUERTE para variantes
+    puntuacion = Math.max(0, puntuacion - 300)
+  } else {
+    // BONUS FUERTE para trámites principales (sin palabras de variante)
+    if (palabrasPrincipales.length > 0) {
+      const todasPalabrasEnNombre = palabrasPrincipales.every(p => nombreNorm.includes(p))
+      if (todasPalabrasEnNombre) {
+        puntuacion += 150 // Bonus muy fuerte para trámites principales
+      }
+    }
+  }
+  
+  // Búsqueda por coincidencia exacta de frase en descripción (menos peso)
+  if (consultaNormalizada.length > 5 && descripcionNorm.includes(consultaNormalizada)) {
     puntuacion += 50
   }
   
-  // Puntuación por palabras clave
+  // Búsqueda por palabras clave individuales
   palabrasClave.forEach(palabra => {
-    // En nombre (alta prioridad)
+    // Solo contar palabras significativas (>3 caracteres)
+    const peso = palabra.length > 3 ? 1 : 0.3
+    
     if (nombreNorm.includes(palabra)) {
-      puntuacion += 20
+      puntuacion += 20 * peso
     }
-    
-    // En descripción (media prioridad)
     if (descripcionNorm.includes(palabra)) {
-      puntuacion += 10
+      puntuacion += 10 * peso
     }
-    
-    // En requisitos (baja prioridad pero útil)
+    if (secretariaNorm.includes(palabra)) {
+      puntuacion += 8 * peso
+    }
+    if (dependenciaNorm.includes(palabra)) {
+      puntuacion += 8 * peso
+    }
     if (requisitosNorm.includes(palabra)) {
-      puntuacion += 5
+      puntuacion += 5 * peso
     }
-    
-    // En secretaría o dependencia
-    if (secretariaNorm.includes(palabra) || dependenciaNorm.includes(palabra)) {
-      puntuacion += 8
-    }
-    
-    // En tipo de trámite
     if (tipoNorm.includes(palabra)) {
-      puntuacion += 3
+      puntuacion += 3 * peso
     }
   })
   
-  // Bonus por múltiples palabras clave encontradas
-  const palabrasEncontradas = palabrasClave.filter(palabra => 
-    nombreNorm.includes(palabra) || 
-    descripcionNorm.includes(palabra) ||
-    requisitosNorm.includes(palabra)
+  // Bonus por múltiples palabras clave encontradas (solo palabras significativas)
+  const palabrasEncontradasNombre = palabrasClave.filter(palabra => 
+    palabra.length > 3 && nombreNorm.includes(palabra)
   ).length
   
-  if (palabrasEncontradas > 1) {
-    puntuacion += palabrasEncontradas * 5
+  const palabrasEncontradasTotal = palabrasClave.filter(palabra => 
+    palabra.length > 3 && (
+      nombreNorm.includes(palabra) || 
+      descripcionNorm.includes(palabra)
+    )
+  ).length
+  
+  // Bonus especial si están en el nombre
+  if (palabrasEncontradasNombre > 1) {
+    puntuacion += palabrasEncontradasNombre * 15
+  } else if (palabrasEncontradasTotal > 1) {
+    puntuacion += palabrasEncontradasTotal * 5
   }
   
   return puntuacion
@@ -100,6 +132,7 @@ export function calcularRelevancia(tramite, palabrasClave, consultaNormalizada) 
 
 /**
  * Busca trámites relevantes basándose en la consulta del usuario
+ * Ahora con expansión de sinónimos para mayor inteligencia
  */
 export function buscarTramitesRelevantes(consulta, limite = 8) {
   const consultaNormalizada = normalizarTexto(consulta)
@@ -110,21 +143,32 @@ export function buscarTramitesRelevantes(consulta, limite = 8) {
     return tramitesData.slice(0, limite)
   }
   
-  // Calcular relevancia para cada trámite
+  // Expandir con sinónimos para búsqueda más inteligente
+  const palabrasExpandidas = expandirConSinonimos(palabrasClave)
+  
+  // Calcular relevancia para cada trámite con palabras expandidas
   const tramitesConPuntuacion = tramitesData.map(tramite => ({
     tramite,
-    puntuacion: calcularRelevancia(tramite, palabrasClave, consultaNormalizada)
+    puntuacion: calcularRelevancia(tramite, palabrasExpandidas, consultaNormalizada)
   }))
   
   // Filtrar solo trámites con puntuación > 0 y ordenar
-  const tramitesRelevantes = tramitesConPuntuacion
+  const tramitesConPuntuacionFiltrados = tramitesConPuntuacion
     .filter(t => t.puntuacion > 0)
     .sort((a, b) => b.puntuacion - a.puntuacion)
     .slice(0, limite)
-    .map(t => t.tramite)
+  
+  // Debug: mostrar los 3 primeros con puntuación
+  console.log('🔍 Top 3 trámites encontrados:')
+  tramitesConPuntuacionFiltrados.slice(0, 3).forEach((item, idx) => {
+    console.log(`  ${idx + 1}. [${item.puntuacion} pts] ${item.tramite.nombre} (ID: ${item.tramite.idtram})`)
+  })
+  
+  const tramitesRelevantes = tramitesConPuntuacionFiltrados.map(t => t.tramite)
   
   // Si aún no hay resultados, buscar por categorías semánticas
   if (tramitesRelevantes.length === 0) {
+    console.log('⚠️ Sin resultados directos, buscando por categorías...')
     return buscarPorCategorias(consultaNormalizada, limite)
   }
   
@@ -132,20 +176,97 @@ export function buscarTramitesRelevantes(consulta, limite = 8) {
 }
 
 /**
+ * Sinónimos y variaciones coloquiales para búsqueda inteligente
+ */
+const SINONIMOS = {
+  // Licencia de conducir - SIN incluir "permiso" para evitar confusión con "permiso provisional"
+  'licencia': ['licencia', 'carnet', 'credencial'],
+  'conducir': ['conducir', 'manejar', 'automovilista', 'conductor', 'vehiculo', 'vehiculos'],
+  'renovar': ['renovar', 'revalidar', 'actualizar', 'refrendo', 'refrendar'],
+  
+  // Actas
+  'acta': ['acta', 'certificado', 'constancia', 'documento'],
+  'nacimiento': ['nacimiento', 'nacer', 'nacido', 'nacio'],
+  'matrimonio': ['matrimonio', 'casamiento', 'boda', 'casarse', 'casar'],
+  'defuncion': ['defuncion', 'muerte', 'fallecimiento', 'fallecido', 'muerto'],
+  'divorcio': ['divorcio', 'separacion', 'divorciarse'],
+  
+  // Predial
+  'predial': ['predial', 'impuesto', 'contribucion', 'pago'],
+  'propiedad': ['propiedad', 'terreno', 'predio', 'inmueble', 'casa', 'lote'],
+  
+  // Construcción
+  'construccion': ['construccion', 'obra', 'edificar', 'construir', 'albañil'],
+  'permiso': ['permiso', 'autorizacion', 'visto bueno'],
+  
+  // Negocios
+  'negocio': ['negocio', 'empresa', 'comercio', 'local', 'tienda', 'establecimiento'],
+  'abrir': ['abrir', 'apertura', 'iniciar', 'empezar', 'poner'],
+  
+  // Agua
+  'agua': ['agua', 'hidrico', 'potable', 'caev'],
+  'toma': ['toma', 'conexion', 'instalacion', 'contrato', 'servicio'],
+  
+  // Documentos
+  'apostilla': ['apostilla', 'apostillar', 'legalizar', 'legalizacion', 'validar'],
+  'copia': ['copia', 'duplicado', 'reposicion', 'otra'],
+  
+  // Vehículos
+  'placas': ['placas', 'placa', 'tarjeta', 'circulacion', 'emplacamiento'],
+  'tarjeton': ['tarjeton', 'tarjeta', 'circulacion', 'vehicular'],
+  
+  // Pensiones y apoyos
+  'pension': ['pension', 'adulto mayor', 'tercera edad', 'jubilado'],
+  'apoyo': ['apoyo', 'ayuda', 'subsidio', 'beca', 'programa'],
+  
+  // Antecedentes
+  'antecedentes': ['antecedentes', 'penales', 'no penales', 'carta'],
+  
+  // Salud
+  'medico': ['medico', 'clinica', 'hospital', 'salud', 'sanitario', 'doctor'],
+  
+  // Educación
+  'titulo': ['titulo', 'certificado', 'diploma', 'cedula', 'estudios'],
+  'escuela': ['escuela', 'colegio', 'preparatoria', 'universidad', 'educacion']
+}
+
+/**
+ * Expande una consulta con sinónimos
+ */
+function expandirConSinonimos(palabrasClave) {
+  const palabrasExpandidas = new Set(palabrasClave)
+  
+  palabrasClave.forEach(palabra => {
+    // Buscar sinónimos
+    for (const [termino, sinonimos] of Object.entries(SINONIMOS)) {
+      if (palabra === termino || sinonimos.includes(palabra)) {
+        // Agregar todos los sinónimos
+        sinonimos.forEach(sin => palabrasExpandidas.add(sin))
+      }
+    }
+  })
+  
+  return Array.from(palabrasExpandidas)
+}
+
+/**
  * Búsqueda por categorías semánticas cuando no hay coincidencias directas
  */
 export function buscarPorCategorias(consultaNormalizada, limite = 8) {
   const categorias = {
-    'agua': ['agua', 'potable', 'alcantarillado', 'drenaje', 'hidrico', 'toma'],
-    'licencia': ['licencia', 'conducir', 'manejo', 'chofer', 'automovilista', 'vehiculo'],
-    'acta': ['acta', 'nacimiento', 'matrimonio', 'defuncion', 'registro', 'civil'],
-    'predial': ['predial', 'impuesto', 'propiedad', 'catastro', 'terreno'],
-    'construccion': ['construccion', 'obra', 'edificar', 'permiso', 'licencia'],
-    'salud': ['salud', 'medico', 'clinica', 'hospital', 'sanitario'],
-    'educacion': ['educacion', 'escuela', 'certificado', 'titulo', 'estudios'],
-    'negocio': ['negocio', 'comercio', 'establecimiento', 'apertura', 'empresa'],
-    'transporte': ['transporte', 'vehiculo', 'placas', 'tarjeton', 'circulacion'],
-    'medio_ambiente': ['ambiente', 'ecologia', 'residuos', 'basura', 'ambiental']
+    'licencia_conducir': ['licencia', 'conducir', 'manejo', 'chofer', 'automovilista', 'manejar', 'carnet', 'permiso conducir'],
+    'actas': ['acta', 'nacimiento', 'matrimonio', 'defuncion', 'registro', 'civil', 'nacer', 'casamiento', 'muerte'],
+    'predial': ['predial', 'impuesto', 'propiedad', 'catastro', 'terreno', 'contribucion', 'predio'],
+    'construccion': ['construccion', 'obra', 'edificar', 'permiso', 'construir', 'albañil'],
+    'agua': ['agua', 'potable', 'alcantarillado', 'drenaje', 'hidrico', 'toma', 'caev', 'conexion'],
+    'salud': ['salud', 'medico', 'clinica', 'hospital', 'sanitario', 'doctor'],
+    'educacion': ['educacion', 'escuela', 'certificado', 'titulo', 'estudios', 'diploma'],
+    'negocio': ['negocio', 'comercio', 'establecimiento', 'apertura', 'empresa', 'tienda', 'local'],
+    'vehiculos': ['transporte', 'vehiculo', 'placas', 'tarjeton', 'circulacion', 'emplacamiento'],
+    'apostilla': ['apostilla', 'apostillar', 'legalizar', 'legalizacion', 'validar'],
+    'antecedentes': ['antecedentes', 'penales', 'no penales', 'carta'],
+    'pension': ['pension', 'adulto mayor', 'tercera edad', 'jubilado', 'apoyo'],
+    'copias': ['copia', 'duplicado', 'reposicion', 'otra']
   }
   
   for (const [categoria, terminos] of Object.entries(categorias)) {

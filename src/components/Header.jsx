@@ -29,9 +29,8 @@ const Header = () => {
   const navItems = [
     { href: '#inicio', label: 'Inicio' },
     { href: '#estrategia', label: 'Nuestra Estrategia' },
-    { href: '#ubicaciones', label: 'Ubicaciones' },
-    { href: '#educacion', label: 'Educación Digital' },
     { href: '#avances', label: 'Panel de Avances' },
+    { href: '#educacion', label: 'Educación Digital' },
     { href: '#participa', label: 'Participa' },
     { href: '#noticias', label: 'Noticias' }
   ]

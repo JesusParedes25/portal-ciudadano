@@ -4,13 +4,15 @@ import HeroSection from './components/HeroSection'
 import StrategySection from './components/StrategySection'
 import ProgressSection from './components/ProgressSection'
 import PlatformsSection from './components/PlatformsSection'
-import LocationsSection from './components/LocationsSection'
+// import LocationsSection from './components/LocationsSection'
+// import ChatbotMapIntegrado from './components/ChatbotMapIntegrado'
+import ChatbotConMapa from './components/ChatbotConMapa'
 import EducationSection from './components/EducationSection'
 import ParticipationSection from './components/ParticipationSection'
 import NewsSection from './components/NewsSection'
 import Footer from './components/Footer'
 import Modal from './components/Modal'
-import Chatbot from './components/Chatbot'
+// import Chatbot from './components/Chatbot'
 import { ModalProvider, useModalContext } from './hooks/useModal.jsx'
 
 function AppContent() {
@@ -74,7 +76,6 @@ function AppContent() {
         <HeroSection />
         <StrategySection />
         <ProgressSection />
-        <LocationsSection />
         <PlatformsSection />
         <EducationSection />
         <ParticipationSection />
@@ -90,8 +91,8 @@ function AppContent() {
         </Modal>
       )}
 
-      {/* Chatbot flotante */}
-      <Chatbot />
+      {/* Chatbot flotante con mapa integrado */}
+      <ChatbotConMapa />
     </div>
   )
 }
